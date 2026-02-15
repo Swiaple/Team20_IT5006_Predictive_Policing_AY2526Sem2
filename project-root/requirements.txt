@@ -1,0 +1,16 @@
+streamlit
+pandas==2.2.2
+numpy==2.0.2
+matplotlib==3.10.0
+plotly
+statsmodels
+geopandas==1.1.2
+shapely
+os
+math
+requests
+tqdm
+seaborn
+holidays
+scipy
+calendar
