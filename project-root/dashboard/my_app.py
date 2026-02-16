@@ -125,6 +125,15 @@ arrest_yearly_topN = filter_year(art["arrest_yearly_topN"], year_range)
 grid = art["grid"]
 points = art["points"]
 
+crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
+crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
+if crime_filter:
+    hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
+    yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
+    arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
+else:
+    hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
+
 # -----------------------------
 # Plot helpers
 # -----------------------------
@@ -264,14 +273,6 @@ if len(selected) == 1:
         with c1:
             plot_top_types(art["top_types"])
         with c2:
-            crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
-            crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
-            if crime_filter:
-                hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
-                yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
-                arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
-            else:
-                hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
             plot_hourly_by_type(hourly_topN_f)
             plot_structure_over_time(yearly_topN_f)
 
@@ -281,26 +282,12 @@ if len(selected) == 1:
         with a1:
             plot_arrest_rate(arrest_yearly)
         with a2:
-            crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
-            crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
-            if crime_filter:
-                arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
-            else:
-                arrest_yearly_topN_f = arrest_yearly_topN
             plot_arrest_rate_by_type(arrest_yearly_topN_f)
 
     elif only == "Location":
         st.header("Location EDA")
         l1, l2 = st.tabs(["Interactive map (optional)", "Professional spatial stats"])
         with l1:
-            crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
-            crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
-            if crime_filter:
-                hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
-                yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
-                arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
-            else:
-                hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
             if show_points_map:
                 plot_location_map(points)
             else:
@@ -314,13 +301,6 @@ elif len(selected) == 2:
 
     if "Time" in selected and "Category" in selected:
         st.subheader("Time × Category")
-        crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
-        crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
-        if crime_filter:
-            hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
-            yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
-        else:
-            hourly_topN_f, yearly_topN_f = hourly_topN, yearly_topN
         plot_hourly_by_type(hourly_topN_f)
         plot_structure_over_time(yearly_topN_f)
 
@@ -332,12 +312,6 @@ elif len(selected) == 2:
     elif "Category" in selected and "Arrest" in selected:
         st.subheader("Category × Arrest")
         # show arrest ranking by type (mean across years in range)
-        crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
-        crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
-        if crime_filter:
-            arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
-        else:
-            arrest_yearly_topN_f = arrest_yearly_topN
         tmp = arrest_yearly_topN_f.groupby("Primary Type")["Arrest_Rate"].mean().reset_index()
         tmp["Arrest_Rate_%"] = tmp["Arrest_Rate"] * 100
         fig = px.bar(tmp.sort_values("Arrest_Rate_%", ascending=False),
@@ -347,42 +321,18 @@ elif len(selected) == 2:
 
     elif "Time" in selected and "Location" in selected:
         st.subheader("Time × Location")
-        crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
-        crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
-        if crime_filter:
-            hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
-            yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
-            arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
-        else:
-            hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
         if show_points_map:
             plot_location_map(points)
         plot_moran(grid)
 
     elif "Category" in selected and "Location" in selected:
         st.subheader("Category × Location")
-        crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
-        crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
-        if crime_filter:
-            hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
-            yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
-            arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
-        else:
-            hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
         if show_points_map:
             plot_location_map(points)
         plot_gistar(grid)
 
     elif "Arrest" in selected and "Location" in selected:
         st.subheader("Arrest × Location")
-        crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
-        crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
-        if crime_filter:
-            hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
-            yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
-            arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
-        else:
-            hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
         if show_points_map and points is not None:
             tmp = points.copy()
             tmp = tmp[(tmp["Year"] >= year_range[0]) & (tmp["Year"] <= year_range[1])]
@@ -403,14 +353,6 @@ elif len(selected) == 2:
 else:
     st.header("Combined EDA (3+ aspects)")
     st.caption("Overview mode: lightweight plots from artifacts")
-    crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
-    crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
-    if crime_filter:
-        hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
-        yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
-        arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
-    else:
-        hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
     t1, t2 = st.tabs(["Interactive overview", "Professional overview"])
     with t1:
         plot_year_trend(yearly)
