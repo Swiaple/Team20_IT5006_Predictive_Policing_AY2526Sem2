@@ -1,133 +1,102 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-
 import plotly.express as px
 from pandas.tseries.holiday import USFederalHolidayCalendar
-from statsmodels.tsa.stattools import acf
 
 LAT_COL, LON_COL = "Latitude", "Longitude"
 
-# -----------------------------
-# Page setup
-# -----------------------------
 st.set_page_config(page_title="Chicago Crime EDA", layout="wide")
 st.title("Chicago Crime EDA Dashboard")
-st.caption("Interactive EDA first, followed by professional/statistical plots. Spatial Moran/Gi* loaded from a precomputed grid.")
+st.caption("Artifacts-only deployment: fast, reproducible, GitHub-friendly.")
+
+ART_DIR = "artifacts"
+
 
 # -----------------------------
-# Data utilities
+# Load artifacts (cached)
 # -----------------------------
-def load_mini_data_csv(csv_path: str) -> pd.DataFrame:
-    usecols = ["Date","Primary Type","Arrest","Domestic","Location Description","Latitude","Longitude"]
-    df = pd.read_csv(csv_path, usecols=usecols).sample(1000)
+@st.cache_data
+def load_artifacts(base: str = ART_DIR):
+    art = {
+        "yearly": pd.read_csv(os.path.join(base, "agg_yearly.csv")),
+        "monthly": pd.read_csv(os.path.join(base, "agg_monthly.csv")),
+        "weekly": pd.read_csv(os.path.join(base, "agg_weekly.csv")),
+        "daily": pd.read_csv(os.path.join(base, "agg_daily.csv")),
+        "top_types": pd.read_csv(os.path.join(base, "top_types.csv")),
+        "hourly_topN": pd.read_csv(os.path.join(base, "hourly_by_type_topN.csv")),
+        "yearly_topN": pd.read_csv(os.path.join(base, "yearly_by_type_topN.csv")),
+        "arrest_yearly": pd.read_csv(os.path.join(base, "arrest_rate_yearly.csv")),
+        "arrest_yearly_topN": pd.read_csv(os.path.join(base, "arrest_rate_yearly_topN.csv")),
+        "grid": pd.read_csv(os.path.join(base, "spatial_grid_precomputed.csv")),
+    }
 
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df = df.dropna(subset=["Date"]).set_index("Date")
+    # daily needs datetime
+    art["daily"]["Date"] = pd.to_datetime(art["daily"]["Date"], errors="coerce")
+    art["daily"] = art["daily"].dropna(subset=["Date"]).sort_values("Date")
 
-    df["Year"] = df.index.year
-    df["Month"] = df.index.month
-    df["Hour"] = df.index.hour
-    df["DayOfWeek"] = df.index.day_name()
-    df["DayNum"] = df.index.dayofweek
+    # optional sample points for interactive map
+    sample_path = os.path.join(base, "sample_points.csv")
+    pts = pd.read_csv(sample_path)
+    # ensure numeric
+    pts[LAT_COL] = pd.to_numeric(pts[LAT_COL], errors="coerce")
+    pts[LON_COL] = pd.to_numeric(pts[LON_COL], errors="coerce")
+    pts["Year"] = pd.to_numeric(pts["Year"], errors="coerce")
+    pts["Month"] = pd.to_numeric(pts["Month"], errors="coerce")
+    pts["Hour"] = pd.to_numeric(pts["Hour"], errors="coerce")
+    art["points"] = pts.dropna(subset=[LAT_COL, LON_COL])
 
-    df["Latitude"] = pd.to_numeric(df["Latitude"], errors="coerce")
-    df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
-    return df
+    return art
 
-def load_big_data_csv(csv_path: str) -> pd.DataFrame:
-    usecols = ["Date","Primary Type","Arrest","Domestic","Location Description","Latitude","Longitude"]
-    df = pd.read_csv(csv_path, usecols=usecols)
 
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df = df.dropna(subset=["Date"]).set_index("Date")
-
-    df["Year"] = df.index.year
-    df["Month"] = df.index.month
-    df["Hour"] = df.index.hour
-    df["DayOfWeek"] = df.index.day_name()
-    df["DayNum"] = df.index.dayofweek
-
-    df["Latitude"] = pd.to_numeric(df["Latitude"], errors="coerce")
-    df["Longitude"] = pd.to_numeric(df["Longitude"], errors="coerce")
-    return df
-
-def preprocess(df: pd.DataFrame) -> pd.DataFrame:
-    # Ensure datetime index
-    if "Date" in df.columns:
-        df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-        df = df.dropna(subset=["Date"]).set_index("Date")
-    if not isinstance(df.index, pd.DatetimeIndex):
-        df.index = pd.to_datetime(df.index, errors="coerce")
-        df = df.dropna(subset=[df.index.name] if df.index.name else None)
-
-    # Core features
-    df["Year"] = df.index.year
-    df["Month"] = df.index.month
-    df["Hour"] = df.index.hour
-    df["DayOfWeek"] = df.index.day_name()
-    df["DayNum"] = df.index.dayofweek
-
-    # Clean lat/lon
-    if LAT_COL in df.columns and LON_COL in df.columns:
-        df[LAT_COL] = pd.to_numeric(df[LAT_COL], errors="coerce")
-        df[LON_COL] = pd.to_numeric(df[LON_COL], errors="coerce")
-
-    return df
-
-def load_csv(uploaded_file) -> pd.DataFrame:
-    df = pd.read_csv(uploaded_file)
-    return preprocess(df)
-
-def load_spatial_grid(path="spatial_grid_precomputed.csv") -> pd.DataFrame:
-    return pd.read_csv(path)
-
-def filter_by_year(df: pd.DataFrame, year_range: tuple[int,int]) -> pd.DataFrame:
+def filter_year(df: pd.DataFrame, year_range):
+    if "Year" not in df.columns:
+        return df
     return df[(df["Year"] >= year_range[0]) & (df["Year"] <= year_range[1])]
 
-def mark_holidays(df: pd.DataFrame) -> pd.DataFrame:
+
+def mark_holidays_daily(daily_df: pd.DataFrame):
+    # daily_df: columns Date, Total_Crimes
+    out = daily_df.copy()
     cal = USFederalHolidayCalendar()
-    holidays = cal.holidays(start=df.index.min(), end=df.index.max())
-    out = df.copy()
-    out["Is_Holiday"] = out.index.normalize().isin(holidays)
+    holidays = cal.holidays(start=out["Date"].min(), end=out["Date"].max())
+    out["Is_Holiday"] = out["Date"].dt.normalize().isin(holidays)
 
     out["Is_Holiday_Window"] = False
     for h in holidays:
         window = pd.date_range(start=h - pd.Timedelta(days=2), end=h + pd.Timedelta(days=7))
-        out.loc[out.index.normalize().isin(window), "Is_Holiday_Window"] = True
+        out.loc[out["Date"].dt.normalize().isin(window), "Is_Holiday_Window"] = True
 
     out["Period_Type"] = "Normal Day"
     out.loc[out["Is_Holiday_Window"], "Period_Type"] = "Holiday Window"
     out.loc[out["Is_Holiday"], "Period_Type"] = "Holiday Day"
     return out
 
+
 # -----------------------------
-# Sidebar: data source
+# Sidebar
 # -----------------------------
 with st.sidebar:
-    st.header("Data")
-    use_mini = st.checkbox("Use mini test data", value=True)
-    st.write('else it would use dataset from 2001 to present, it would take 1-2 minutes to making the graph for different pill chosed')
+    st.header("Mode")
+    st.write("This deployment version uses precomputed artifacts in `artifacts/`.")
     st.divider()
-    st.header("Chicago 2001 Dataset Path")
-    st.caption("Expected file: ~/Crimes_2001.csv")
-    data_path = st.text_input("Dataset path", value="/Users/ziyi/Downloads/Crimes_2001.csv")
+    st.header("Location map")
+    show_points_map = st.checkbox("Enable interactive point density map (needs artifacts/sample_points.csv)", value=True)
 
-if use_mini:
-    df = load_mini_data_csv(data_path)
-else:
-    df = load_big_data_csv(data_path)
+art = load_artifacts()
 
-# sanity checks
-required_cols = ["Primary Type", "Arrest", "Location Description"]
-missing = [c for c in required_cols if c not in df.columns]
-if missing:
-    st.error(f"Your dataset is missing required columns: {missing}")
+# Basic checks
+needed = ["yearly", "monthly", "weekly", "daily", "top_types", "hourly_topN", "yearly_topN", "arrest_yearly", "arrest_yearly_topN", "grid"]
+missing_files = [k for k in needed if k not in art or art[k] is None]
+if missing_files:
+    st.error(f"Missing required artifacts: {missing_files}. Make sure `artifacts/` contains all required CSVs.")
     st.stop()
 
+
 # -----------------------------
-# Pills: choose aspects
+# Pills
 # -----------------------------
 options = ["Time", "Category", "Location", "Arrest"]
 selection = st.pills("Which aspect do you intend to know about?", options, selection_mode="multi")
@@ -137,59 +106,123 @@ if not selected:
     st.info("Select at least one pill to start.")
     st.stop()
 
-# -----------------------------
-# Common filters shown when Time is involved
-# -----------------------------
-year_range = (int(df["Year"].min()), int(df["Year"].max()))
+# Year slider from yearly artifact
+year_min = int(art["yearly"]["Year"].min())
+year_max = int(art["yearly"]["Year"].max())
+year_range = (year_min, year_max)
 if "Time" in selected:
-    year_range = st.slider(
-        "Select Year Range",
-        int(df["Year"].min()),
-        int(df["Year"].max()),
-        (int(df["Year"].min()), int(df["Year"].max()))
-    )
+    year_range = st.slider("Select Year Range", year_min, year_max, (year_min, year_max))
 
-df_filtered = filter_by_year(df, year_range)
-
-# optional category filter
-top_types = df_filtered["Primary Type"].value_counts().nlargest(10).index.tolist()
-crime_filter = st.multiselect("Crime types (optional)", options=sorted(df_filtered["Primary Type"].unique()),
-                             default=top_types[:5])
-if crime_filter:
-    df_filtered = df_filtered[df_filtered["Primary Type"].isin(crime_filter)]
+# Filter key artifacts by year
+yearly = filter_year(art["yearly"], year_range)
+monthly = art["monthly"]  # month is overall, not year-specific unless you build yearly-month artifact
+weekly = art["weekly"]
+daily = art["daily"]
+hourly_topN = art["hourly_topN"]          # already topN types overall
+yearly_topN = filter_year(art["yearly_topN"], year_range)
+arrest_yearly = filter_year(art["arrest_yearly"], year_range)
+arrest_yearly_topN = filter_year(art["arrest_yearly_topN"], year_range)
+grid = art["grid"]
+points = art["points"]
 
 # -----------------------------
-# Helper: interactive charts (Plotly)
+# Plot helpers
 # -----------------------------
-def plot_year_trend_interactive(df_):
-    yearly = df_.groupby("Year").size().reset_index(name="Total Crimes")
-    fig = px.line(yearly, x="Year", y="Total Crimes", markers=True, title="Annual Crime Trend")
+def mpl(fig):
+    st.pyplot(fig, use_container_width=True)
+
+def plot_year_trend(df_):
+    fig = px.line(df_, x="Year", y="Total_Crimes", markers=True, title="Annual Crime Trend")
     st.plotly_chart(fig, use_container_width=True)
 
-def plot_monthly_interactive(df_):
-    monthly = df_.groupby("Month").size().reset_index(name="Total Crimes").sort_values("Month")
-    fig = px.bar(monthly, x="Month", y="Total Crimes", color = 'Month', title="Monthly Seasonality")
+def plot_monthly(df_):
+    fig = px.bar(df_.sort_values("Month"), x="Month", y="Total_Crimes", color = 'Month', title="Monthly Seasonality")
     st.plotly_chart(fig, use_container_width=True)
 
-def plot_weekly_interactive(df_):
-    weekly = (df_.groupby(["DayNum","DayOfWeek"]).size()
-              .reset_index(name="Total Crimes").sort_values("DayNum"))
-    fig = px.bar(weekly, x="DayOfWeek", y="Total Crimes", color = "DayOfWeek", title="Weekly Cycle")
+def plot_weekly(df_):
+    fig = px.bar(df_.sort_values("DayNum"), x="DayOfWeek", y="Total_Crimes", color = 'DayOfWeek', title="Weekly Cycle")
     st.plotly_chart(fig, use_container_width=True)
 
-def plot_top5_category_interactive(df_):
-    counts = df_["Primary Type"].value_counts().nlargest(5).reset_index()
-    counts.columns = ["Primary Type", "Total Crimes"]
-    fig = px.bar(counts, x="Primary Type", y="Total Crimes", color="Primary Type", title="Top-5 Crime Types")
+def plot_top_types(df_):
+    fig = px.bar(df_, x="Primary Type", y="Total_Crimes", color="Primary Type", title="Top Crime Types (precomputed)")
     st.plotly_chart(fig, use_container_width=True)
 
-def plot_location_density_interactive(df_):
-    if LAT_COL not in df_.columns or LON_COL not in df_.columns:
-        st.warning("No Latitude/Longitude columns found.")
+def plot_hourly_by_type(df_):
+    fig = px.line(df_, x="Hour", y="Total_Crimes", color="Primary Type", markers=True,
+                  title="When do specific crimes happen? (Top types)")
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_structure_over_time(df_):
+    # df_: Year, Primary Type, Total_Crimes
+    pivot = df_.pivot_table(index="Year", columns="Primary Type", values="Total_Crimes", fill_value=0)
+    ratio = pivot.div(pivot.sum(axis=1), axis=0)
+
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ratio.plot(kind="area", stacked=True, ax=ax, alpha=0.8)
+    ax.set_title("Crime Type Structure Over Time (stacked area, top types)")
+    ax.set_ylabel("Proportion")
+    ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
+    mpl(fig)
+
+def plot_arrest_rate(df_):
+    # df_: Year, Arrest_Rate
+    tmp = df_.copy()
+    tmp["Arrest_Rate_%"] = tmp["Arrest_Rate"] * 100
+    fig = px.line(tmp, x="Year", y="Arrest_Rate_%", markers=True, title="Arrest Rate by Year (%)")
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_arrest_rate_by_type(df_):
+    tmp = df_.copy()
+    tmp["Arrest_Rate_%"] = tmp["Arrest_Rate"] * 100
+    fig = px.line(tmp, x="Year", y="Arrest_Rate_%", color="Primary Type", markers=True,
+                  title="Arrest Rate by Year (Top types)")
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_holiday(daily_df):
+    dfh = mark_holidays_daily(daily_df)
+    # compare daily counts distributions
+    comp = dfh.groupby("Period_Type")["Total_Crimes"].mean().reset_index()
+    fig = px.bar(comp, x="Period_Type", y="Total_Crimes", title="Mean daily crimes: Holiday vs Normal")
+    st.plotly_chart(fig, use_container_width=True)
+
+def plot_moran(grid_df):
+    fig, ax = plt.subplots(figsize=(6.5, 6))
+    hb = ax.hexbin(grid_df["z_standardized"], grid_df["lag"], gridsize=70, bins="log", mincnt=1, linewidths=0)
+    fig.colorbar(hb, ax=ax, shrink=0.9).set_label("log10(count)")
+    ax.axhline(0, linewidth=1)
+    ax.axvline(0, linewidth=1)
+    I = float(grid_df["Moran_I_overall"].iloc[0]) if "Moran_I_overall" in grid_df.columns else None
+    ax.set_title("Moran Scatter" + (f" (I={I:.3f})" if I is not None else ""))
+    ax.set_xlabel("Standardized cell count (z)")
+    ax.set_ylabel("Spatial lag (rook mean)")
+    mpl(fig)
+
+def plot_gistar(grid_df):
+    fig, ax = plt.subplots(figsize=(7, 6))
+    ax.scatter(grid_df["lon"], grid_df["lat"], c=grid_df["Gi_cat"], s=6)
+    ax.set_title("Gi* Hotspot/Coldspot classes")
+    ax.set_xlabel("Longitude")
+    ax.set_ylabel("Latitude")
+    mpl(fig)
+
+    fig2, ax2 = plt.subplots(figsize=(7, 6))
+    ax2.scatter(grid_df["lon"], grid_df["lat"], c=grid_df["Gi_z"], s=6)
+    ax2.set_title("Gi* z-scores")
+    ax2.set_xlabel("Longitude")
+    ax2.set_ylabel("Latitude")
+    mpl(fig2)
+
+def plot_location_map(points_df):
+    if points_df is None:
+        st.info("No sample_points.csv found. Location map disabled.")
         return
-    tmp = df_.dropna(subset=[LAT_COL, LON_COL])
+    # filter by year & crime filter if possible
+    tmp = points_df.copy()
+    tmp = tmp[(tmp["Year"] >= year_range[0]) & (tmp["Year"] <= year_range[1])]
+    if crime_filter:
+        tmp = tmp[tmp["Primary Type"].isin(crime_filter)]
     if tmp.empty:
-        st.warning("No valid latitude/longitude after filtering.")
+        st.warning("No points left after filters.")
         return
     fig = px.density_mapbox(
         tmp,
@@ -202,278 +235,190 @@ def plot_location_density_interactive(df_):
     )
     st.plotly_chart(fig, use_container_width=True)
 
-def plot_arrest_rate_interactive(df_):
-    ar = df_.groupby("Year")["Arrest"].mean().reset_index()
-    ar["Arrest Rate"] = ar["Arrest"] * 100
-    fig = px.line(ar, x="Year", y="Arrest Rate", markers=True, title="Arrest Rate by Year (%)")
-    st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------------
-# Helper: professional plots (Matplotlib / statsmodels style)
+# Rendering logic
 # -----------------------------
-def st_mpl(fig):
-    st.pyplot(fig, use_container_width=True)
-
-def plot_acf_professional(df_, mode="raw", lags=60):
-    daily = df_.resample("D").size()
-    if mode == "diff":
-        daily = daily.diff().dropna()
-    if daily.empty:
-        st.warning("Not enough daily data for ACF.")
-        return
-    vals = acf(daily.values, nlags=lags, fft=True)
-    fig, ax = plt.subplots(figsize=(10, 4))
-    ax.bar(np.arange(len(vals)), vals)
-    ax.axhline(0, linewidth=1)
-    ax.set_title("ACF (Daily counts)" + (" after differencing" if mode=="diff" else ""))
-    ax.set_xlabel("Lag")
-    ax.set_ylabel("Autocorrelation")
-    st_mpl(fig)
-
-def plot_holiday_professional(df_):
-    dfh = mark_holidays(df_)
-    top5 = dfh["Primary Type"].value_counts().nlargest(5).index
-    subset = dfh[dfh["Primary Type"].isin(top5)]
-    comp = subset.groupby(["Period_Type","Primary Type"]).size().unstack(fill_value=0)
-    comp_pct = comp.div(comp.sum(axis=1), axis=0)
-
-    fig, ax = plt.subplots(figsize=(10, 5))
-    comp_pct.plot(kind="bar", stacked=True, ax=ax)
-    ax.set_title("Crime composition: Holiday vs Normal days (Top-5)")
-    ax.set_ylabel("Proportion")
-    ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
-    st_mpl(fig)
-
-    # Hourly pulse holiday vs normal
-    fig2, ax2 = plt.subplots(figsize=(10, 4))
-    for p_type in ["Holiday Day", "Normal Day"]:
-        data = dfh[dfh["Period_Type"] == p_type]
-        hourly = data["Hour"].value_counts(normalize=True).sort_index()
-        ax2.plot(hourly.index, hourly.values, linewidth=2.5, label=p_type)
-    ax2.set_title("Hourly pulse: Holiday Day vs Normal Day")
-    ax2.set_xlabel("Hour")
-    ax2.set_ylabel("Probability density")
-    ax2.legend()
-    st_mpl(fig2)
-
-def plot_moran_professional(grid_df):
-    fig, ax = plt.subplots(figsize=(6.5, 6))
-    hb = ax.hexbin(grid_df["z_standardized"], grid_df["lag"], gridsize=70, bins="log", mincnt=1, linewidths=0)
-    fig.colorbar(hb, ax=ax, shrink=0.9).set_label("log10(count)")
-    ax.axhline(0, linewidth=1)
-    ax.axvline(0, linewidth=1)
-    ax.set_title("Moran Scatter (precomputed grid)")
-    ax.set_xlabel("Standardized cell count (z)")
-    ax.set_ylabel("Spatial lag (rook mean)")
-    st_mpl(fig)
-
-def plot_gistar_professional(grid_df):
-    # classification map (scatter as a fast “raster-like” view)
-    fig, ax = plt.subplots(figsize=(7, 6))
-    sc = ax.scatter(grid_df["lon"], grid_df["lat"], c=grid_df["Gi_cat"], s=6)
-    ax.set_title("Gi* Hotspot/Coldspot classes (precomputed)")
-    ax.set_xlabel("Longitude")
-    ax.set_ylabel("Latitude")
-    st_mpl(fig)
-
-    # Gi* z values
-    fig2, ax2 = plt.subplots(figsize=(7, 6))
-    sc2 = ax2.scatter(grid_df["lon"], grid_df["lat"], c=grid_df["Gi_z"], s=6)
-    ax2.set_title("Gi* z-scores (precomputed)")
-    ax2.set_xlabel("Longitude")
-    ax2.set_ylabel("Latitude")
-    st_mpl(fig2)
-
-# -----------------------------
-# UI rendering
-# -----------------------------
-# Single-pill pages
 if len(selected) == 1:
     only = next(iter(selected))
 
     if only == "Time":
         st.header("Time EDA")
-        t1, t2, t3, t4 = st.tabs(["Interactive basics", "Crime-time (Top types)", "ACF (pro)", "Holiday (pro)"])
+        t1, t2, t3 = st.tabs(["Interactive basics", "Professional add-ons", "Holiday"])
 
         with t1:
-            plot_year_trend_interactive(df_filtered)
-            plot_monthly_interactive(df_filtered)
-            plot_weekly_interactive(df_filtered)
+            plot_year_trend(yearly)
+            plot_monthly(monthly)
+            plot_weekly(weekly)
 
         with t2:
-            top5 = df_filtered["Primary Type"].value_counts().nlargest(5).index
-            sub = df_filtered[df_filtered["Primary Type"].isin(top5)]
-            hourly = sub.groupby(["Hour","Primary Type"]).size().reset_index(name="Total")
-            fig = px.line(hourly, x="Hour", y="Total", color="Primary Type", markers=True,
-                          title="When do specific crimes happen? (Top-5)")
-            st.plotly_chart(fig, use_container_width=True)
+            plot_hourly_by_type(hourly_topN_f)
+            plot_structure_over_time(yearly_topN_f)
 
         with t3:
-            plot_acf_professional(df_filtered, mode="raw", lags=60)
-            plot_acf_professional(df_filtered, mode="diff", lags=30)
-
-        with t4:
-            plot_holiday_professional(df_filtered)
+            plot_holiday(daily)
 
     elif only == "Category":
         st.header("Category EDA")
-        c1, c2 = st.tabs(["Interactive", "Professional (structure)"])
+        c1, c2 = st.tabs(["Top types", "Structure & hourly (pro)"])
         with c1:
-            plot_top5_category_interactive(df_filtered)
-
+            plot_top_types(art["top_types"])
         with c2:
-            # professional: stacked ratio + absolute counts (Top-5)
-            top5 = df_filtered["Primary Type"].value_counts().nlargest(5).index
-            df_top5 = df_filtered[df_filtered["Primary Type"].isin(top5)]
-            counts = df_top5.groupby(["Year","Primary Type"]).size().unstack(fill_value=0)
-            ratio = counts.div(counts.sum(axis=1), axis=0)
-
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ratio.plot(kind="area", stacked=True, ax=ax, alpha=0.8)
-            ax.set_title("Crime type structure over time (Top-5, stacked area)")
-            ax.set_ylabel("Proportion")
-            ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
-            st_mpl(fig)
-
-            fig2, ax2 = plt.subplots(figsize=(10, 4))
-            counts.plot(ax=ax2, linewidth=2)
-            ax2.set_title("Crime counts by type over time (Top-5)")
-            ax2.set_ylabel("Count")
-            ax2.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
-            st_mpl(fig2)
-
-    elif only == "Location":
-        st.header("Location EDA")
-        plot_location_density_interactive(df_filtered)
+            crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
+            crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
+            if crime_filter:
+                hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
+                yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
+                arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
+            else:
+                hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
+            plot_hourly_by_type(hourly_topN_f)
+            plot_structure_over_time(yearly_topN_f)
 
     elif only == "Arrest":
         st.header("Arrest EDA")
-        a1, a2 = st.tabs(["Interactive", "Professional (Top-5 by type)"])
+        a1, a2 = st.tabs(["Overall arrest rate", "By type (top)"])
         with a1:
-            plot_arrest_rate_interactive(df_filtered)
+            plot_arrest_rate(arrest_yearly)
         with a2:
-            top5 = df_filtered["Primary Type"].value_counts().nlargest(5).index
-            df_top5 = df_filtered[df_filtered["Primary Type"].isin(top5)]
-            ar = df_top5.groupby(["Year","Primary Type"])["Arrest"].mean().unstack()
+            crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
+            crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
+            if crime_filter:
+                arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
+            else:
+                arrest_yearly_topN_f = arrest_yearly_topN
+            plot_arrest_rate_by_type(arrest_yearly_topN_f)
 
-            fig, ax = plt.subplots(figsize=(10, 5))
-            for ct in top5:
-                if ct in ar.columns:
-                    ax.plot(ar.index, ar[ct], marker="s", linewidth=2, label=ct)
-            ax.set_title("Arrest rate by type (Top-5)")
-            ax.set_xlabel("Year")
-            ax.set_ylabel("Arrest rate")
-            ax.legend(bbox_to_anchor=(1.02, 1), loc="upper left")
-            st_mpl(fig)
+    elif only == "Location":
+        st.header("Location EDA")
+        l1, l2 = st.tabs(["Interactive map (optional)", "Professional spatial stats"])
+        with l1:
+            crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
+            crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
+            if crime_filter:
+                hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
+                yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
+                arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
+            else:
+                hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
+            if show_points_map:
+                plot_location_map(points)
+            else:
+                st.info("Map disabled in sidebar.")
+        with l2:
+            plot_moran(grid)
+            plot_gistar(grid)
 
-# Two-pill combinations
 elif len(selected) == 2:
     st.header("Combined EDA (2 aspects)")
-    s = selected
 
-    # Time + Category
-    if "Time" in s and "Category" in s:
+    if "Time" in selected and "Category" in selected:
         st.subheader("Time × Category")
-        top5 = df_filtered["Primary Type"].value_counts().nlargest(5).index
-        sub = df_filtered[df_filtered["Primary Type"].isin(top5)]
-        hourly = sub.groupby(["Hour","Primary Type"]).size().reset_index(name="Total")
-        fig = px.line(hourly, x="Hour", y="Total", color="Primary Type", markers=True,
-                      title="Hourly pattern by top crime types")
-        st.plotly_chart(fig, use_container_width=True)
-
-        # professional add-on: normalized density
-        pivot = sub.groupby(["Hour","Primary Type"]).size().unstack(fill_value=0)
-        pivot_norm = pivot.div(pivot.sum(axis=0), axis=1)
-        fig2, ax2 = plt.subplots(figsize=(10, 4))
-        pivot_norm.plot(ax=ax2, linewidth=2)
-        ax2.set_title("Professional: normalized hourly density (Top-5)")
-        ax2.set_xlabel("Hour")
-        ax2.set_ylabel("Relative probability")
-        st_mpl(fig2)
-
-    # Time + Location
-    elif "Time" in s and "Location" in s:
-        st.subheader("Time × Location")
-        plot_location_density_interactive(df_filtered)
-
-        # professional add-on: ACF
-        st.caption("Professional add-on: daily memory (ACF)")
-        plot_acf_professional(df_filtered, mode="raw", lags=60)
-
-    # Category + Location
-    elif "Category" in s and "Location" in s:
-        st.subheader("Category × Location")
-        if LAT_COL in df_filtered.columns and LON_COL in df_filtered.columns:
-            tmp = df_filtered.dropna(subset=[LAT_COL, LON_COL])
-            top5 = tmp["Primary Type"].value_counts().nlargest(5).index
-            tmp = tmp[tmp["Primary Type"].isin(top5)]
-            fig = px.scatter_mapbox(
-                tmp,
-                lat=LAT_COL, lon=LON_COL,
-                color="Primary Type",
-                zoom=10,
-                mapbox_style="carto-positron",
-                hover_data=["Location Description"]
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
+        crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
+        if crime_filter:
+            hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
+            yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
         else:
-            st.warning("No Latitude/Longitude found.")
+            hourly_topN_f, yearly_topN_f = hourly_topN, yearly_topN
+        plot_hourly_by_type(hourly_topN_f)
+        plot_structure_over_time(yearly_topN_f)
 
-    # Time + Arrest
-    elif "Time" in s and "Arrest" in s:
+    elif "Time" in selected and "Arrest" in selected:
         st.subheader("Time × Arrest")
-        plot_arrest_rate_interactive(df_filtered)
-        st.caption("Professional add-on: holiday comparison")
-        plot_holiday_professional(df_filtered)
+        plot_arrest_rate(arrest_yearly)
+        plot_arrest_rate_by_type(arrest_yearly_topN_f)
 
-    # Category + Arrest
-    elif "Category" in s and "Arrest" in s:
+    elif "Category" in selected and "Arrest" in selected:
         st.subheader("Category × Arrest")
-        top5 = df_filtered["Primary Type"].value_counts().nlargest(5).index
-        df_top5 = df_filtered[df_filtered["Primary Type"].isin(top5)]
-        ar = df_top5.groupby("Primary Type")["Arrest"].mean().sort_values(ascending=False).reset_index()
-        ar["Arrest Rate (%)"] = ar["Arrest"] * 100
-        fig = px.bar(ar, x="Primary Type", y="Arrest Rate (%)", color="Primary Type",
-                     title="Arrest rate by crime type (Top-5)")
+        # show arrest ranking by type (mean across years in range)
+        crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
+        crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
+        if crime_filter:
+            arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
+        else:
+            arrest_yearly_topN_f = arrest_yearly_topN
+        tmp = arrest_yearly_topN_f.groupby("Primary Type")["Arrest_Rate"].mean().reset_index()
+        tmp["Arrest_Rate_%"] = tmp["Arrest_Rate"] * 100
+        fig = px.bar(tmp.sort_values("Arrest_Rate_%", ascending=False),
+                     x="Primary Type", y="Arrest_Rate_%", color="Primary Type",
+                     title="Mean arrest rate by type (selected years)")
         st.plotly_chart(fig, use_container_width=True)
 
-    # Location + Arrest
-    elif "Location" in s and "Arrest" in s:
-        st.subheader("Location × Arrest")
-        if LAT_COL in df_filtered.columns and LON_COL in df_filtered.columns:
-            tmp = df_filtered.dropna(subset=[LAT_COL, LON_COL])
-            tmp["ArrestLabel"] = tmp["Arrest"].map({True:"Arrested", False:"Not arrested"})
+    elif "Time" in selected and "Location" in selected:
+        st.subheader("Time × Location")
+        crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
+        crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
+        if crime_filter:
+            hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
+            yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
+            arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
+        else:
+            hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
+        if show_points_map:
+            plot_location_map(points)
+        plot_moran(grid)
+
+    elif "Category" in selected and "Location" in selected:
+        st.subheader("Category × Location")
+        crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
+        crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
+        if crime_filter:
+            hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
+            yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
+            arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
+        else:
+            hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
+        if show_points_map:
+            plot_location_map(points)
+        plot_gistar(grid)
+
+    elif "Arrest" in selected and "Location" in selected:
+        st.subheader("Arrest × Location")
+        crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
+        crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
+        if crime_filter:
+            hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
+            yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
+            arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
+        else:
+            hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
+        if show_points_map and points is not None:
+            tmp = points.copy()
+            tmp = tmp[(tmp["Year"] >= year_range[0]) & (tmp["Year"] <= year_range[1])]
+            tmp["ArrestLabel"] = tmp["Arrest"].map({True: "Arrested", False: "Not arrested"})
+            if crime_filter:
+                tmp = tmp[tmp["Primary Type"].isin(crime_filter)]
             fig = px.scatter_mapbox(
                 tmp,
                 lat=LAT_COL, lon=LON_COL,
                 color="ArrestLabel",
                 zoom=10,
                 mapbox_style="carto-positron",
-                hover_data=["Primary Type","Location Description"]
+                hover_data=["Primary Type", "Location Description"]
             )
             st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.warning("No Latitude/Longitude found.")
+        plot_moran(grid)
 
-# 3+ pills: show a combined “overview”
 else:
     st.header("Combined EDA (3+ aspects)")
-    st.caption("Showing a compact overview. For deeper details, select 1–2 pills.")
-
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Rows after filters", f"{len(df_filtered):,}")
-    with col2:
-        st.metric("Year range", f"{year_range[0]}–{year_range[1]}")
-    with col3:
-        st.metric("Crime types selected", f"{len(crime_filter)}")
-
-    # Compact multi-view
+    st.caption("Overview mode: lightweight plots from artifacts")
+    crime_options = sorted(art["top_types"]["Primary Type"].unique().tolist())
+    crime_filter = st.multiselect("Crime types (optional, affects type-based charts)", crime_options, default=crime_options[:5])
+    if crime_filter:
+        hourly_topN_f = hourly_topN[hourly_topN["Primary Type"].isin(crime_filter)]
+        yearly_topN_f = yearly_topN[yearly_topN["Primary Type"].isin(crime_filter)]
+        arrest_yearly_topN_f = arrest_yearly_topN[arrest_yearly_topN["Primary Type"].isin(crime_filter)]
+    else:
+        hourly_topN_f, yearly_topN_f, arrest_yearly_topN_f = hourly_topN, yearly_topN, arrest_yearly_topN
     t1, t2 = st.tabs(["Interactive overview", "Professional overview"])
     with t1:
-        plot_year_trend_interactive(df_filtered)
-        plot_top5_category_interactive(df_filtered)
-        plot_location_density_interactive(df_filtered)
-        plot_arrest_rate_interactive(df_filtered)
+        plot_year_trend(yearly)
+        plot_top_types(art["top_types"])
+        if show_points_map:
+            plot_location_map(points)
+        plot_arrest_rate(arrest_yearly)
     with t2:
-        plot_acf_professional(df_filtered, mode="raw", lags=60)
+        plot_structure_over_time(yearly_topN_f)
+        plot_moran(grid)
+        plot_gistar(grid)
