@@ -20,6 +20,6 @@ Execute the following command in your terminal:
 ```bash
 streamlit run my_app.py
 ```
+or
 
-### 4. Access the Dashboard
-The dashboard will open in your browser at [http://localhost:8501](http://localhost:8501).
+### Directly access our app through: [https://steamlikgroup20-dj9xpta5r7po78swjd83ag.streamlit.app](https://steamlikgroup20-dj9xpta5r7po78swjd83ag.streamlit.app)
