@@ -10,10 +10,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 
-
-# =========================
 # Config
-# =========================
 BASE_DIR = Path(__file__).resolve().parent
 
 DATA_DIR = BASE_DIR / "processed"
@@ -39,14 +36,11 @@ PIN_MEMORY = True
 MODEL_SAVE_PATH = "best_lstm_grid_total_with_neighbors.pt"
 PRED_SAVE_DIR = "lstm_preds_with_neighbors"
 
-# 是否加入邻域特征
+# neighbor region feature
 USE_NEIGHBOR_SUM = True
 USE_NEIGHBOR_MEAN = True
 
-
-# =========================
-# Reproducibility
-# =========================
+# reproducibility
 def seed_everything(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -54,9 +48,7 @@ def seed_everything(seed=42):
     torch.cuda.manual_seed_all(seed)
 
 
-# =========================
-# Spatial Neighbor Utils
-# =========================
+# spatial neighbor utils
 def get_neighbors(grid_idx: int, meta: dict) -> list[int]:
     """
     返回 grid_idx 对应格子的 8-连通邻居索引列表，越界自动跳过。
@@ -78,9 +70,6 @@ def get_neighbors(grid_idx: int, meta: dict) -> list[int]:
 
 
 def build_neighbor_map(meta: dict, n_grids: int):
-    """
-    为每个 grid 预先建立邻居索引表
-    """
     neighbor_map = []
     for g in range(n_grids):
         neighbor_map.append(get_neighbors(g, meta))
@@ -89,16 +78,13 @@ def build_neighbor_map(meta: dict, n_grids: int):
 
 def build_spatial_features(total_counts: np.ndarray, meta: dict) -> np.ndarray:
     """
-    根据每个网格的总犯罪数，构造带空间邻域信息的输入特征
+
+    according to sum of total crime number，construct the space neighbour's input feature
 
     total_counts: (T, G)
     return:
         spatial_x: (T, D_spatial)
 
-    这里默认拼接：
-    - 自身网格值 own
-    - 邻居总和 neighbor_sum
-    - 邻居平均 neighbor_mean
     """
     T, G = total_counts.shape
     neighbor_map = build_neighbor_map(meta, G)
@@ -127,9 +113,7 @@ def build_spatial_features(total_counts: np.ndarray, meta: dict) -> np.ndarray:
     return spatial_x
 
 
-# =========================
 # Dataset
-# =========================
 class CrimeSeqDataset(Dataset):
     """
     每个样本 = 过去 LOOKBACK 步 -> 预测当前 t 这一步（即未来4h）
@@ -156,10 +140,7 @@ class CrimeSeqDataset(Dataset):
         y = self.y_all[t]                     # (G,)
         return torch.from_numpy(x), torch.from_numpy(y)
 
-
-# =========================
 # Model
-# =========================
 class LSTMGridRegressor(nn.Module):
     def __init__(self, input_dim, hidden_size, num_layers, dropout, output_dim):
         super().__init__()
@@ -185,9 +166,7 @@ class LSTMGridRegressor(nn.Module):
         return pred
 
 
-# =========================
 # Metrics
-# =========================
 def mae_np(y_true, y_pred):
     return np.mean(np.abs(y_true - y_pred))
 
@@ -206,9 +185,7 @@ def occurrence_acc_np(y_true, y_pred, threshold=0.0):
     return np.mean(true_bin == pred_bin)
 
 
-# =========================
 # Evaluation
-# =========================
 @torch.no_grad()
 def evaluate(model, loader, device):
     model.eval()
@@ -253,10 +230,7 @@ def evaluate(model, loader, device):
         "targets": all_targets,
     }
 
-
-# =========================
 # Main
-# =========================
 def main():
     seed_everything(SEED)
     os.makedirs(PRED_SAVE_DIR, exist_ok=True)
@@ -281,8 +255,7 @@ def main():
 
     if LOOKBACK != meta["lookback"]:
         print(f"[WARN] Config LOOKBACK={LOOKBACK}, but meta lookback={meta['lookback']}")
-
-    # ======================================================
+        
     # 目标：预测每个网格“未来4h总犯罪数”
     # 做法：
     # 1) 先把 5 类犯罪按网格求和 => (T, G)
@@ -292,7 +265,6 @@ def main():
     #    - neighbor mean
     # 3) 再拼接时间特征
     # 输出：当前 t 这一步所有网格的总数
-    # ======================================================
     total_counts = tensor.sum(axis=2).astype(np.float32)   # (T, G)
 
     # 构造带空间信息的输入
