@@ -1,0 +1,59 @@
+----- Final Results -----
+[type_0] Validation MAE                : 0.026478
+[type_0] Validation RMSE               : 0.142216
+[type_0] Validation ACC                : 0.335785
+[type_0] Validation Temporal Precision : 0.585253
+[type_0] Validation Spatial PAI        : 8.197119
+[type_0] Test MAE                      : 0.024716
+[type_0] Test RMSE                     : 0.135634
+[type_0] Test ACC                      : 0.333877
+[type_0] Test Temporal Precision       : 0.578341
+[type_0] Test Spatial PAI              : 8.415745
+
+----- Final Results -----
+[type_1] Validation MAE                : 0.021996
+[type_1] Validation RMSE               : 0.121088
+[type_1] Validation ACC                : 0.340716
+[type_1] Validation Temporal Precision : 0.294931
+[type_1] Validation Spatial PAI        : 7.601673
+[type_1] Test MAE                      : 0.021008
+[type_1] Test RMSE                     : 0.116835
+[type_1] Test ACC                      : 0.340498
+[type_1] Test Temporal Precision       : 0.306452
+[type_1] Test Spatial PAI              : 7.494505
+
+----- Final Results -----
+[type_2] Validation MAE                : 0.013783
+[type_2] Validation RMSE               : 0.096431
+[type_2] Validation ACC                : 0.318399
+[type_2] Validation Temporal Precision : 0.226476
+[type_2] Validation Spatial PAI        : 6.361489
+[type_2] Test MAE                      : 0.013184
+[type_2] Test RMSE                     : 0.096365
+[type_2] Test ACC                      : 0.317727
+[type_2] Test Temporal Precision       : 0.213561
+[type_2] Test Spatial PAI              : 6.193078
+
+----- Final Results -----
+[type_3] Validation MAE                : 0.010867
+[type_3] Validation RMSE               : 0.085326
+[type_3] Validation ACC                : 0.345439
+[type_3] Validation Temporal Precision : 0.269565
+[type_3] Validation Spatial PAI        : 6.848003
+[type_3] Test MAE                      : 0.010360
+[type_3] Test RMSE                     : 0.081929
+[type_3] Test ACC                      : 0.344998
+[type_3] Test Temporal Precision       : 0.270742
+[type_3] Test Spatial PAI              : 6.983145
+
+----- Final Results -----
+[type_4] Validation MAE                : 0.008012
+[type_4] Validation RMSE               : 0.070874
+[type_4] Validation ACC                : 0.335910
+[type_4] Validation Temporal Precision : 0.213004
+[type_4] Validation Spatial PAI        : 6.953455
+[type_4] Test MAE                      : 0.007622
+[type_4] Test RMSE                     : 0.067329
+[type_4] Test ACC                      : 0.335571
+[type_4] Test Temporal Precision       : 0.192394
+[type_4] Test Spatial PAI              : 6.804381
