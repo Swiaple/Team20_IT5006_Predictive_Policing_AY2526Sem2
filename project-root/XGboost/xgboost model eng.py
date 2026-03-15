@@ -11,9 +11,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error, accuracy_sc
 import xgboost as xgb
 
 
-# =========================================================
 # 1. Basic utilities
-# =========================================================
 
 def load_meta(processed_dir: Path) -> dict:
     with open(processed_dir / "meta.json", "r", encoding="utf-8") as f:
@@ -96,10 +94,7 @@ def ensure_dir(path: Path):
 def rmse(y_true, y_pred):
     return math.sqrt(mean_squared_error(y_true, y_pred))
 
-
-# =========================================================
 # 2. Feature configuration
-# =========================================================
 
 def get_feature_config():
     """
@@ -144,9 +139,7 @@ def build_feature_names(n_types: int, time_feature_cols: list, config: dict):
     return feature_names
 
 
-# =========================================================
 # 3. Build features for all grids at one anchor time
-# =========================================================
 
 def safe_window_mean(arr: np.ndarray, start: int, end: int):
     """
@@ -239,9 +232,7 @@ def build_features_for_time(
     return x
 
 
-# =========================================================
 # 4. Build split arrays
-# =========================================================
 
 def get_anchor_ranges(meta: dict, horizon: int):
     """
@@ -338,9 +329,7 @@ def build_split_arrays(
     return x_path, y_path, feature_names
 
 
-# =========================================================
 # 5. Training and evaluation
-# =========================================================
 
 def get_crime_type_names(meta: dict):
     # Use type_names from meta if available
@@ -476,9 +465,7 @@ def train_one_crime_type(
     return metrics
 
 
-# =========================================================
 # 6. Main pipeline
-# =========================================================
 
 def main(args):
     data_dir = Path(args.data_dir)
